@@ -96,6 +96,13 @@ void HW3::BakeCubemap()
     // that also holds graphics stages.
     glUseProgram(bakeCompute.shaderId);
     glUniform1i(1, skyCubemap.faceSize); // U_FACE_SIZE
+    // Cloud uniforms (locations match equirectToCubemap.comp)
+    glm::vec3 toSun = -sun.direction;
+    glUniform3fv(2, 1, glm::value_ptr(toSun));
+    glUniform3fv(3, 1, glm::value_ptr(clouds.noiseOffset));
+    glUniform1f(4, clouds.noiseScale);
+    glUniform1f(5, clouds.coverage);
+    glUniform1f(6, clouds.density);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, hdrEquirect.textureId);
@@ -481,6 +488,17 @@ void HW3::Work()
     ImGui::SliderFloat("Middle Gray", &middleGray, 0.001f, 1.0f);
     ImGui::SliderFloat("LWhite (x10^6)", &lWhite, 0.01f, 10.0f);
     ImGui::End();
+
+    static bool cloudsOpen = true;
+    ImGui::Begin("Clouds", &cloudsOpen);
+    bool changed = false;
+    changed |= ImGui::DragFloat3("Noise Offset", &clouds.noiseOffset.x, 0.02f);
+    changed |= ImGui::SliderFloat("Noise Scale", &clouds.noiseScale, 0.1f, 8.0f);
+    changed |= ImGui::SliderFloat("Coverage", &clouds.coverage, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Density", &clouds.density, 0.0f, 16.0f);
+    ImGui::End();
+    // Clouds are baked into the cubemap; re-bake when a parameter changes.
+    if(changed) cubemapDirty = true;
 
     glUseProgramStages(state.renderPipeline, GL_VERTEX_SHADER_BIT, ppVert.shaderId);
     glActiveShaderProgram(state.renderPipeline, ppVert.shaderId);

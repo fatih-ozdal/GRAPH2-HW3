@@ -10,8 +10,21 @@ uniform T_EQUIRECT sampler2D uEquirect;
 // enforces this. Bound on image unit 1 so it never collides with a unit-0 2D.
 I_CUBE writeonly uniform imageCube uCube;
 
-layout(location = 1) uniform int uFaceSize;
+layout(location = 1) uniform int  uFaceSize;
+// Cloud parameters (the offset + scale ones are exposed via ImGui).
+layout(location = 2) uniform vec3  uSunDir;       // direction toward the sun
+layout(location = 3) uniform vec3  uNoiseOffset;
+layout(location = 4) uniform float uNoiseScale;   // frequency
+layout(location = 5) uniform float uCoverage;     // [0,1], higher = fewer clouds
+layout(location = 6) uniform float uDensity;      // extinction strength
+
 const float PI = 3.14159265358979;
+
+// Clouds fill a volume around the viewer; every direction is marched.
+const int   STEPS       = 32;
+const int   LIGHT_STEPS = 4;
+const float MARCH_DIST  = 6.0;   // total view-ray march length
+const float LIGHT_STEP  = 0.3;   // step length toward the sun
 
 // Standard GL cube face direction from an in-face uv in [-1, 1].
 vec3 FaceDirection(uint face, vec2 uv)
@@ -22,6 +35,129 @@ vec3 FaceDirection(uint face, vec2 uv)
     if(face == 3u) return vec3( uv.x,  -1.0, -uv.y); // -Y
     if(face == 4u) return vec3( uv.x, -uv.y,   1.0); // +Z
     return                vec3(-uv.x, -uv.y,  -1.0); // -Z
+}
+
+// Perlin (gradient) noise using the course slides' gradient set + permutation
+// table, the quintic fade, and 8-corner gradient interpolation.
+const vec3 gradients[16] = vec3[16](
+    vec3( 1, 1, 0), vec3(-1, 1, 0), vec3( 1,-1, 0), vec3(-1,-1, 0),
+    vec3( 1, 0, 1), vec3(-1, 0, 1), vec3( 1, 0,-1), vec3(-1, 0,-1),
+    vec3( 0, 1, 1), vec3( 0,-1, 1), vec3( 0, 1,-1), vec3( 0,-1,-1),
+    vec3( 1, 1, 0), vec3(-1, 1, 0), vec3( 0,-1, 1), vec3( 0,-1,-1)
+);
+const int table[16] = int[16](0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15);
+
+float fade(float t)
+{
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+}
+
+int permute(int x, int y, int z)
+{
+    int h = table[x & 15];
+    h = table[(h + y) & 15];
+    h = table[(h + z) & 15];
+    return h & 15;
+}
+
+// Gradient dot the distance vector from a given lattice corner.
+float gradDot(int ix, int iy, int iz, vec3 d)
+{
+    return dot(gradients[permute(ix, iy, iz)], d);
+}
+
+float perlin(vec3 p)
+{
+    vec3 pi = floor(p);
+    vec3 pf = p - pi;
+    ivec3 i = ivec3(pi);
+
+    float u = fade(pf.x);
+    float v = fade(pf.y);
+    float w = fade(pf.z);
+
+    float n000 = gradDot(i.x,   i.y,   i.z,   pf - vec3(0,0,0));
+    float n100 = gradDot(i.x+1, i.y,   i.z,   pf - vec3(1,0,0));
+    float n010 = gradDot(i.x,   i.y+1, i.z,   pf - vec3(0,1,0));
+    float n110 = gradDot(i.x+1, i.y+1, i.z,   pf - vec3(1,1,0));
+    float n001 = gradDot(i.x,   i.y,   i.z+1, pf - vec3(0,0,1));
+    float n101 = gradDot(i.x+1, i.y,   i.z+1, pf - vec3(1,0,1));
+    float n011 = gradDot(i.x,   i.y+1, i.z+1, pf - vec3(0,1,1));
+    float n111 = gradDot(i.x+1, i.y+1, i.z+1, pf - vec3(1,1,1));
+
+    float nx00 = mix(n000, n100, u);
+    float nx10 = mix(n010, n110, u);
+    float nx01 = mix(n001, n101, u);
+    float nx11 = mix(n011, n111, u);
+    float nxy0 = mix(nx00, nx10, v);
+    float nxy1 = mix(nx01, nx11, v);
+    return mix(nxy0, nxy1, w);
+}
+
+// Turbulence: octaves of |perlin| with halving amplitude, in ~[0,1).
+float fbm(vec3 p)
+{
+    float v = 0.0, a = 0.5;
+    for(int i = 0; i < 4; ++i)
+    {
+        v += a * abs(perlin(p));
+        p *= 2.0;
+        a *= 0.5;
+    }
+    return v;
+}
+
+// Cloud density at a world point, in [0,1] (no elevation dependence).
+float cloudDensity(vec3 p)
+{
+    float n = fbm(p * uNoiseScale + uNoiseOffset);
+    return smoothstep(uCoverage, 1.0, n);
+}
+
+float hgPhase(float cosTheta, float g)
+{
+    float g2 = g * g;
+    return (1.0 - g2) / (4.0 * PI * pow(1.0 + g2 - 2.0 * g * cosTheta, 1.5));
+}
+
+// Self-shadow transmittance: short march toward the sun.
+float lightMarch(vec3 p)
+{
+    float od = 0.0;
+    for(int i = 0; i < LIGHT_STEPS; ++i)
+    {
+        vec3 lp = p + uSunDir * (float(i) + 0.5) * LIGHT_STEP;
+        od += cloudDensity(lp);
+    }
+    return exp(-od * LIGHT_STEP * uDensity);
+}
+
+// Ray-march clouds for direction 'dir' (all directions) and composite over sky.
+vec3 renderClouds(vec3 dir, vec3 sky)
+{
+    float stepSize = MARCH_DIST / float(STEPS);
+
+    float cosTheta = dot(dir, uSunDir);
+    float phase = hgPhase(cosTheta, 0.4);
+    vec3  sunCol = vec3(1.0, 0.95, 0.85) * 6.0;
+    vec3  ambient = sky * 0.6;
+
+    float transmittance = 1.0;
+    vec3  scatter = vec3(0.0);
+    for(int i = 0; i < STEPS; ++i)
+    {
+        vec3 p = dir * ((float(i) + 0.5) * stepSize);
+        float dens = cloudDensity(p);
+        if(dens > 0.001)
+        {
+            float sigma = dens * uDensity;
+            vec3 light = lightMarch(p) * phase * sunCol + ambient;
+            scatter += transmittance * sigma * stepSize * light;
+            transmittance *= exp(-sigma * stepSize);
+            if(transmittance < 0.01) break;
+        }
+    }
+    return sky * transmittance + scatter;
 }
 
 void main()
@@ -44,6 +180,7 @@ void main()
     float incl    = acos(clamp(dir.y, -1.0, 1.0));
     vec2 e = vec2((azimuth + PI) * (0.5 / PI), 1.0 - incl / PI);
 
-    vec3 color = textureLod(uEquirect, e, 0.0).rgb;
+    vec3 sky = textureLod(uEquirect, e, 0.0).rgb;
+    vec3 color = renderClouds(dir, sky);
     imageStore(uCube, ivec3(texel, int(face)), vec4(color, 1.0));
 }

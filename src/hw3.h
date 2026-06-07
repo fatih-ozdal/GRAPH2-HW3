@@ -5,6 +5,14 @@
 
 #include <array>
 
+struct CloudParams
+{
+    glm::vec3 noiseOffset = glm::vec3(0.0f);
+    float     noiseScale  = 0.5f;   // frequency (low = large clouds)
+    float     coverage    = 0.25f;  // higher = fewer clouds
+    float     density     = 8.0f;
+};
+
 struct HW3
 {
     // HW2 scene objects are reused only as containers for their GL resources
@@ -33,9 +41,11 @@ struct HW3
     GLuint     frameColorTex  = 0;
     GLuint     frameDepthTex  = 0;
 
-    // sun.direction will later be derived from the brightest pixel of the
-    // HDR equirect texture rather than hand-set.
+    // sun.direction is derived from the brightest pixel of the HDR equirect.
     SunParams  sun;
+
+    // Volumetric clouds baked into the cubemap; editing these sets cubemapDirty.
+    CloudParams clouds;
 
     float middleGray = 0.18f;
     float lWhite     = 1.0f;
