@@ -3,12 +3,14 @@
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 #define T_EQUIRECT layout(binding = 0)
-#define I_CUBE     layout(rgba32f, binding = 0)
+#define I_CUBE     layout(rgba32f, binding = 1)
 
 uniform T_EQUIRECT sampler2D uEquirect;
-// Layered view of the cubemap as a 6-layer array (portable on Mesa).
-I_CUBE writeonly uniform image2DArray uCube;
+// imageCube (not image2DArray) to match the GL_TEXTURE_CUBE_MAP target; Mesa
+// enforces this. Bound on image unit 1 so it never collides with a unit-0 2D.
+I_CUBE writeonly uniform imageCube uCube;
 
+layout(location = 1) uniform int uFaceSize;
 const float PI = 3.14159265358979;
 
 // Standard GL cube face direction from an in-face uv in [-1, 1].
@@ -24,7 +26,7 @@ vec3 FaceDirection(uint face, vec2 uv)
 
 void main()
 {
-    ivec2 size  = imageSize(uCube).xy;
+    ivec2 size  = ivec2(uFaceSize);
     ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
     uint  face  = gl_GlobalInvocationID.z;
     if(texel.x >= size.x || texel.y >= size.y) return;

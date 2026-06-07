@@ -16,7 +16,7 @@
 #define U_PIX_COUNT layout(location = 1)
 #define U_WHITE		layout(location = 2)
 
-#define T_HDR_FRAME	layout(binding = 0)
+#define T_HDR_FRAME	layout(binding = 15)
 
 // In
 in IN_UV vec2 fUV;

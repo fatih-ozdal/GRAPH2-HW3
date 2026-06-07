@@ -661,7 +661,7 @@ void HW2::Work()
     static constexpr GLuint U_PIX_COUNT = 1;
     static constexpr GLuint U_WHITE     = 2;
     //
-    static constexpr GLuint T_HDR_FRAME = 0;
+    static constexpr GLuint T_HDR_FRAME = 15;
 
     // GUI Params
     static bool hdrIsOpen = true;

@@ -1,89 +1,8 @@
 #include "hw3.h"
 #include <bit>
 #include <cstdio>
-#include <cstdint>
-#include <cmath>
-#include <vector>
-#include <algorithm>
 
 #include <stb_image.h>
-
-// Replicates the compute shader's FaceDirection so the baked corner directions
-// can be checked against the OpenGL cube-map spec.
-static glm::vec3 FaceDirCPU(int face, float u, float v)
-{
-    switch(face)
-    {
-        case 0:  return glm::normalize(glm::vec3( 1.0f, -v, -u)); // +X
-        case 1:  return glm::normalize(glm::vec3(-1.0f, -v,  u)); // -X
-        case 2:  return glm::normalize(glm::vec3(  u,  1.0f,  v)); // +Y
-        case 3:  return glm::normalize(glm::vec3(  u, -1.0f, -v)); // -Y
-        case 4:  return glm::normalize(glm::vec3(  u, -v,  1.0f)); // +Z
-        default: return glm::normalize(glm::vec3( -u, -v, -1.0f)); // -Z
-    }
-}
-
-// Reads back each baked cube face (mip 0) and writes faceN.ppm (Reinhard +
-// gamma, flipped so the PPM is upright) for visual inspection of the bake.
-static void DumpCubeFaces(const CubemapGL& cube)
-{
-    int n = cube.faceSize;
-    std::vector<float> buf(size_t(n) * size_t(n) * 4);
-    std::vector<uint8_t> rgb(size_t(n) * size_t(n) * 3);
-    glBindTexture(GL_TEXTURE_CUBE_MAP, cube.textureId);
-    for(int f = 0; f < 6; ++f)
-    {
-        glGetTexImage(GLenum(GL_TEXTURE_CUBE_MAP_POSITIVE_X + f), 0,
-                      GL_RGBA, GL_FLOAT, buf.data());
-        for(int y = 0; y < n; ++y)
-        for(int x = 0; x < n; ++x)
-        {
-            const float* p = &buf[(size_t(y) * size_t(n) + size_t(x)) * 4];
-            int oy = n - 1 - y; // PPM is top-to-bottom
-            uint8_t* o = &rgb[(size_t(oy) * size_t(n) + size_t(x)) * 3];
-            for(int c = 0; c < 3; ++c)
-            {
-                float v = p[c];
-                v = v / (v + 1.0f);              // Reinhard
-                v = std::pow(v, 1.0f / 2.2f);    // gamma
-                o[c] = uint8_t(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
-            }
-        }
-        char name[32];
-        std::snprintf(name, sizeof(name), "face%d.ppm", f);
-        if(std::FILE* fp = std::fopen(name, "wb"))
-        {
-            std::fprintf(fp, "P6\n%d %d\n255\n", n, n);
-            std::fwrite(rgb.data(), 1, rgb.size(), fp);
-            std::fclose(fp);
-            std::printf("[BAKE-DEBUG] wrote %s\n", name);
-        }
-    }
-    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
-}
-
-static void LogFaceCorners(int faceSize)
-{
-    static const char* const names[6] = { "+X", "-X", "+Y", "-Y", "+Z", "-Z" };
-    // GL-spec corner direction at texel (0,0) (in-face u,v -> -1), normalized.
-    static const glm::vec3 expected[6] =
-    {
-        glm::normalize(glm::vec3( 1,  1,  1)), // +X
-        glm::normalize(glm::vec3(-1,  1, -1)), // -X
-        glm::normalize(glm::vec3(-1,  1, -1)), // +Y
-        glm::normalize(glm::vec3(-1, -1,  1)), // -Y
-        glm::normalize(glm::vec3(-1,  1,  1)), // +Z
-        glm::normalize(glm::vec3( 1,  1, -1)), // -Z
-    };
-    float c = (0.5f) / float(faceSize) * 2.0f - 1.0f; // u == v at texel (0,0)
-    for(int f = 0; f < 6; ++f)
-    {
-        glm::vec3 a = FaceDirCPU(f, c, c);
-        const glm::vec3& e = expected[f];
-        std::printf("[BAKE-DEBUG] face %d (%s) (0,0): actual=(%.3f, %.3f, %.3f)  expected=(%.3f, %.3f, %.3f)\n",
-                    f, names[f], a.x, a.y, a.z, e.x, e.y, e.z);
-    }
-}
 
 static const char* const HdrPath = "textures/qwantani_mid_morning_puresky_2k.hdr";
 
@@ -168,29 +87,36 @@ HW3::HW3(ThreadPool& threadPool, GLState& state)
     glBindVertexArray(0);
 
     sun.direction = SunLightDirFromHDR(HdrPath);
-    LogFaceCorners(skyCubemap.faceSize);
 }
 
 void HW3::BakeCubemap()
 {
-    glUseProgramStages(state.renderPipeline, GL_COMPUTE_SHADER_BIT, bakeCompute.shaderId);
-    glActiveShaderProgram(state.renderPipeline, bakeCompute.shaderId);
+    // Compute is dispatched via a plain program (not the separable pipeline):
+    // Mesa can misresolve layout bindings for a compute stage on a pipeline
+    // that also holds graphics stages.
+    glUseProgram(bakeCompute.shaderId);
+    glUniform1i(1, skyCubemap.faceSize); // U_FACE_SIZE
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, hdrEquirect.textureId);
-    glBindImageTexture(0, skyCubemap.textureId, 0, GL_TRUE, 0,
+    glBindImageTexture(1, skyCubemap.textureId, 0, GL_TRUE, 0,
                        GL_WRITE_ONLY, GL_RGBA32F);
 
     GLuint groups = GLuint(skyCubemap.faceSize) / 8u;
     glDispatchCompute(groups, groups, 6);
-    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+    glMemoryBarrier(GL_ALL_BARRIER_BITS);
 
     glBindTexture(GL_TEXTURE_CUBE_MAP, skyCubemap.textureId);
     glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
 
     // Release the image binding so the cube is not left aliased as a writable
     // image while it is sampled as a texture during rendering.
-    glBindImageTexture(0, 0, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    glBindImageTexture(1, 0, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+
+    // Clean up texture unit 0 bindings to prevent driver-specific conflicts
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+    glUseProgram(0);
 }
 
 void HW3::RenderBackground(const glm::mat4& view, const glm::vec2& fov)
@@ -217,6 +143,10 @@ void HW3::RenderBackground(const glm::mat4& view, const glm::vec2& fov)
     }
     glBindVertexArray(ppVAO);
     glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    // Clean up
+    glActiveTexture(GL_TEXTURE0 + T_HDR);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
 }
 
 void HW3::RenderTerrain(const glm::mat4& view, const glm::mat4& proj)
@@ -281,6 +211,15 @@ void HW3::RenderTerrain(const glm::mat4& view, const glm::mat4& proj)
     }
     glBindVertexArray(terrain.terrain.vaoId);
     glDrawElements(GL_TRIANGLES, terrain.terrain.indexCount, GL_UNSIGNED_INT, nullptr);
+
+    // Clean up
+    for(GLuint i = 0; i < 8; ++i)
+    {
+        glActiveTexture(GL_TEXTURE0 + i);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+    glActiveTexture(GL_TEXTURE0 + T_HDR);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
 }
 
 void HW3::RenderWater(const glm::mat4& view, const glm::mat4& proj, float deltaT)
@@ -326,6 +265,10 @@ void HW3::RenderWater(const glm::mat4& view, const glm::mat4& proj, float deltaT
     }
     glBindVertexArray(water.mesh.vaoId);
     glDrawElements(GL_TRIANGLES, water.mesh.indexCount, GL_UNSIGNED_INT, nullptr);
+
+    // Clean up
+    glActiveTexture(GL_TEXTURE0 + T_HDR);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
 }
 
 void HW3::RenderPlane(const glm::mat4& view, const glm::mat4& proj)
@@ -402,6 +345,15 @@ void HW3::RenderPlane(const glm::mat4& view, const glm::mat4& proj)
 
     glm::mat4x4 glassModel = model * glm::translate(glm::identity<glm::mat4x4>(), Plane::localGlassTranslate);
     DrawPart(glassModel, GLASS, plane.glassMesh);
+
+    // Clean up
+    for(GLuint i = 0; i < 4; ++i)
+    {
+        glActiveTexture(GL_TEXTURE0 + i);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+    glActiveTexture(GL_TEXTURE0 + T_HDR);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
 }
 
 void HW3::ResetFramebuffer()
@@ -449,8 +401,6 @@ void HW3::ResetFramebuffer()
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 }
 
-int x = 31;
-
 void HW3::Work()
 {
     static float lastTime = 0;
@@ -476,16 +426,6 @@ void HW3::Work()
     if(cubemapDirty)
     {
         BakeCubemap();
-        DumpCubeFaces(skyCubemap); // temporary debug
-        cubemapDirty = false;
-    }
-
-    x++;
-
-    if (x == 5000)
-    {
-        BakeCubemap();
-        DumpCubeFaces(skyCubemap); // temporary debug
         cubemapDirty = false;
     }
 
@@ -526,13 +466,15 @@ void HW3::Work()
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     glViewport(0, 0, curFBSize[0], curFBSize[1]);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glBindTexture(GL_TEXTURE_2D, frameColorTex);
-    glGenerateMipmap(GL_TEXTURE_2D);
 
     static constexpr GLuint U_MID_GRAY  = 0;
     static constexpr GLuint U_PIX_COUNT = 1;
     static constexpr GLuint U_WHITE     = 2;
-    static constexpr GLuint T_HDR_FRAME = 0;
+    static constexpr GLuint T_HDR_FRAME = 15;
+
+    glActiveTexture(GL_TEXTURE0 + T_HDR_FRAME);
+    glBindTexture(GL_TEXTURE_2D, frameColorTex);
+    glGenerateMipmap(GL_TEXTURE_2D);
 
     static bool hdrIsOpen = true;
     ImGui::Begin("HDR Params", &hdrIsOpen);
@@ -554,6 +496,10 @@ void HW3::Work()
     }
     glBindVertexArray(ppVAO);
     glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    // Clean up
+    glActiveTexture(GL_TEXTURE0 + T_HDR_FRAME);
+    glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 HW3::~HW3()

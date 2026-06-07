@@ -28,7 +28,7 @@ void main()
 	vec3 viewRay = vec3(ndc.x * uTanHalfFov.x, ndc.y * uTanHalfFov.y, -1.0);
 	vec3 dir = normalize(uInvView * viewRay);
 
-	vec3 hdrColor = texture(tHDR, dir).rgb;
+	vec3 hdrColor = textureLod(tHDR, dir, 0.0f).rgb;
 	float lum = (0.2126 * hdrColor.r +
 	             0.7152 * hdrColor.g +
 				 0.0722 * hdrColor.b);

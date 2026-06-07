@@ -56,5 +56,5 @@ void main(void)
 	float lum = (0.2126 * result .r +
 	             0.7152 * result .g +
 				 0.0722 * result .b);
-	fboColor = vec4(result, log(result + 1e-6f));
+	fboColor = vec4(result, log(lum + 1e-6f));
 }
