@@ -18,9 +18,14 @@ struct HW3
     TextureGL  hdrEquirect;
     CubemapGL  skyCubemap;
     ShaderGL   bakeCompute;
+    // Re-bake the cubemap whenever set (startup + future cloud param changes).
+    bool       cubemapDirty = true;
 
     ShaderGL   ppVert;
-    ShaderGL   hdrFrag;       // sky background pass
+    ShaderGL   skyCubeFrag;       // sky background (samplerCube)
+    ShaderGL   terrainCubeFrag;
+    ShaderGL   waterCubeFrag;
+    ShaderGL   planeCubeFrag;
     ShaderGL   toneMapFrag;
 
     glm::ivec2 curFBSize = glm::ivec2(0, 0);
@@ -55,4 +60,12 @@ struct HW3
     void ResetFramebuffer();
     // Bakes hdrEquirect into skyCubemap (compute) and regenerates its mips.
     void BakeCubemap();
+
+    // HW3 cube-IBL draw path: reuses the HW2 components' vertex programs,
+    // meshes and material textures but binds skyCubemap as a samplerCube and
+    // uses the *_cube.frag shaders. HW2's own Render() methods are not used.
+    void RenderBackground(const glm::mat4& view, const glm::vec2& fov);
+    void RenderTerrain(const glm::mat4& view, const glm::mat4& proj);
+    void RenderWater(const glm::mat4& view, const glm::mat4& proj, float deltaT);
+    void RenderPlane(const glm::mat4& view, const glm::mat4& proj);
 };

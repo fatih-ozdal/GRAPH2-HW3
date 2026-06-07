@@ -6,7 +6,8 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 #define I_CUBE     layout(rgba32f, binding = 0)
 
 uniform T_EQUIRECT sampler2D uEquirect;
-I_CUBE writeonly uniform imageCube uCube;
+// Layered view of the cubemap as a 6-layer array (portable on Mesa).
+I_CUBE writeonly uniform image2DArray uCube;
 
 const float PI = 3.14159265358979;
 
@@ -23,7 +24,7 @@ vec3 FaceDirection(uint face, vec2 uv)
 
 void main()
 {
-    ivec2 size  = imageSize(uCube);
+    ivec2 size  = imageSize(uCube).xy;
     ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
     uint  face  = gl_GlobalInvocationID.z;
     if(texel.x >= size.x || texel.y >= size.y) return;
@@ -31,19 +32,16 @@ void main()
     // Pixel center -> [-1, 1]
     vec2 uv = (vec2(texel) + 0.5) / vec2(size) * 2.0 - 1.0;
 
-    // Cubemaps are left-handed (RenderMan legacy). imageStore bypasses the
-    // sampler's internal coordinate flip, so mirror the in-face axes here:
-    // horizontal for the X/Z faces, vertical for the Y faces.
-    if(face == 2u || face == 3u) uv.y = -uv.y;
-    else                         uv.x = -uv.x;
-
+    // The standard GL face-direction table already matches how the cubemap is
+    // sampled, so the produced direction is used as-is (no per-face flips).
     vec3 dir = normalize(FaceDirection(face, uv));
 
-    // Direction -> equirectangular UV
-    float phi   = atan(dir.z, dir.x);
-    float theta = acos(clamp(dir.y, -1.0, 1.0));
-    vec2 e = vec2(phi * (0.5 / PI) + 0.5, theta / PI);
+    // Direction -> equirectangular UV, identical to the HW2 shaders'
+    // DirToSphericalUV so the baked cube keeps the source orientation.
+    float azimuth = atan(dir.x, dir.z);
+    float incl    = acos(clamp(dir.y, -1.0, 1.0));
+    vec2 e = vec2((azimuth + PI) * (0.5 / PI), 1.0 - incl / PI);
 
-    vec3 color = texture(uEquirect, e).rgb;
+    vec3 color = textureLod(uEquirect, e, 0.0).rgb;
     imageStore(uCube, ivec3(texel, int(face)), vec4(color, 1.0));
 }
