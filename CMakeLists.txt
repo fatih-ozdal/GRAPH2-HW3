@@ -109,7 +109,8 @@ set(SRC_SHADERS
     ${CENG_SHADER_DIR}/water.frag
     ${CENG_SHADER_DIR}/postProcess.vert
     ${CENG_SHADER_DIR}/hdr.frag
-    ${CENG_SHADER_DIR}/toneMap.frag)
+    ${CENG_SHADER_DIR}/toneMap.frag
+    ${CENG_SHADER_DIR}/equirectToCubemap.comp)
 
 source_group("" FILES ${SRC_ALL})
 source_group("Shaders" FILES ${SRC_SHADERS})

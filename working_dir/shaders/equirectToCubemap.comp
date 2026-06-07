@@ -1,0 +1,49 @@
+#version 430
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+#define T_EQUIRECT layout(binding = 0)
+#define I_CUBE     layout(rgba32f, binding = 0)
+
+uniform T_EQUIRECT sampler2D uEquirect;
+I_CUBE writeonly uniform imageCube uCube;
+
+const float PI = 3.14159265358979;
+
+// Standard GL cube face direction from an in-face uv in [-1, 1].
+vec3 FaceDirection(uint face, vec2 uv)
+{
+    if(face == 0u) return vec3(  1.0, -uv.y, -uv.x); // +X
+    if(face == 1u) return vec3( -1.0, -uv.y,  uv.x); // -X
+    if(face == 2u) return vec3( uv.x,   1.0,  uv.y); // +Y
+    if(face == 3u) return vec3( uv.x,  -1.0, -uv.y); // -Y
+    if(face == 4u) return vec3( uv.x, -uv.y,   1.0); // +Z
+    return                vec3(-uv.x, -uv.y,  -1.0); // -Z
+}
+
+void main()
+{
+    ivec2 size  = imageSize(uCube);
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    uint  face  = gl_GlobalInvocationID.z;
+    if(texel.x >= size.x || texel.y >= size.y) return;
+
+    // Pixel center -> [-1, 1]
+    vec2 uv = (vec2(texel) + 0.5) / vec2(size) * 2.0 - 1.0;
+
+    // Cubemaps are left-handed (RenderMan legacy). imageStore bypasses the
+    // sampler's internal coordinate flip, so mirror the in-face axes here:
+    // horizontal for the X/Z faces, vertical for the Y faces.
+    if(face == 2u || face == 3u) uv.y = -uv.y;
+    else                         uv.x = -uv.x;
+
+    vec3 dir = normalize(FaceDirection(face, uv));
+
+    // Direction -> equirectangular UV
+    float phi   = atan(dir.z, dir.x);
+    float theta = acos(clamp(dir.y, -1.0, 1.0));
+    vec2 e = vec2(phi * (0.5 / PI) + 0.5, theta / PI);
+
+    vec3 color = texture(uEquirect, e).rgb;
+    imageStore(uCube, ivec3(texel, int(face)), vec4(color, 1.0));
+}

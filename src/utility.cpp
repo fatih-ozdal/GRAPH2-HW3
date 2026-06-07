@@ -617,7 +617,9 @@ CubemapGL::CubemapGL(int faceSizeIn)
 
     glGenTextures(1, &textureId);
     glBindTexture(GL_TEXTURE_CUBE_MAP, textureId);
-    glTexStorage2D(GL_TEXTURE_CUBE_MAP, GLsizei(mipCount), GL_RGB32F,
+    // RGBA (not RGB): the bake writes via imageStore, and GL image units
+    // only accept 1/2/4-channel formats.
+    glTexStorage2D(GL_TEXTURE_CUBE_MAP, GLsizei(mipCount), GL_RGBA32F,
                    faceSize, faceSize);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);

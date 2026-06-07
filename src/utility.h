@@ -186,7 +186,7 @@ struct CubemapGL
     GLuint  textureId = 0;
     int     faceSize  = 0;  // width == height of each face
 
-    // Allocates an empty RGB32F cubemap with a full mip chain; the bake
+    // Allocates an empty RGBA32F cubemap with a full mip chain; the bake
     // compute shader writes the contents later.
                CubemapGL(int faceSize);
                CubemapGL(const CubemapGL&) = delete;

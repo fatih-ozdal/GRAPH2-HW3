@@ -17,6 +17,7 @@ struct HW3
     // Source equirect HDR (input to the bake) and the baked sky+clouds cubemap.
     TextureGL  hdrEquirect;
     CubemapGL  skyCubemap;
+    ShaderGL   bakeCompute;
 
     ShaderGL   ppVert;
     ShaderGL   hdrFrag;       // sky background pass
@@ -52,4 +53,6 @@ struct HW3
 
     void Work();
     void ResetFramebuffer();
+    // Bakes hdrEquirect into skyCubemap (compute) and regenerates its mips.
+    void BakeCubemap();
 };

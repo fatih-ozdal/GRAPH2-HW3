@@ -1,6 +1,40 @@
 #include "hw3.h"
 #include <bit>
 
+#include <stb_image.h>
+
+static const char* const HdrPath = "textures/qwantani_mid_morning_puresky_2k.hdr";
+
+// Brightest equirect pixel -> the direction light travels (scene shaders use
+// -uLDir as the light vector). Inverts the same mapping the bake compute uses.
+static glm::vec3 SunLightDirFromHDR(const char* path)
+{
+    stbi_set_flip_vertically_on_load(1);
+    int w = 0, h = 0, c = 0;
+    float* px = stbi_loadf(path, &w, &h, &c, 3);
+    if(!px) return glm::normalize(glm::vec3(0.5f, -0.5f, 0.0f));
+
+    float best = -1.0f;
+    int bx = 0, by = 0;
+    for(int y = 0; y < h; ++y)
+    for(int x = 0; x < w; ++x)
+    {
+        const float* p = px + (size_t(y) * size_t(w) + size_t(x)) * 3;
+        float lum = 0.2126f * p[0] + 0.7152f * p[1] + 0.0722f * p[2];
+        if(lum > best) { best = lum; bx = x; by = y; }
+    }
+    stbi_image_free(px);
+
+    float u = (float(bx) + 0.5f) / float(w);
+    float v = (float(by) + 0.5f) / float(h);
+    float phi   = (u - 0.5f) * 2.0f * glm::pi<float>();
+    float theta = v * glm::pi<float>();
+    glm::vec3 toSun = glm::vec3(glm::sin(theta) * glm::cos(phi),
+                                glm::cos(theta),
+                                glm::sin(theta) * glm::sin(phi));
+    return glm::normalize(-toSun);
+}
+
 HW3::HW3(ThreadPool& threadPool, GLState& state)
     : terrain(threadPool,
               TerrainMeshGenerationParams
@@ -23,8 +57,9 @@ HW3::HW3(ThreadPool& threadPool, GLState& state)
                 .vertexCount = glm::vec2(1024, 1024)
             })
     , state(state)
-    , hdrEquirect("textures/qwantani_mid_morning_puresky_2k.hdr", TextureGL::LINEAR, TextureGL::REPEAT)
+    , hdrEquirect(HdrPath, TextureGL::LINEAR, TextureGL::REPEAT)
     , skyCubemap(1024)
+    , bakeCompute(ShaderGL::COMPUTE, "shaders/equirectToCubemap.comp")
     , ppVert(ShaderGL::VERTEX, "shaders/postProcess.vert")
     , hdrFrag(ShaderGL::FRAGMENT, "shaders/hdr.frag")
     , toneMapFrag(ShaderGL::FRAGMENT, "shaders/toneMap.frag")
@@ -45,6 +80,27 @@ HW3::HW3(ThreadPool& threadPool, GLState& state)
     glVertexAttribFormat(0, 2, GL_FLOAT, GL_FALSE, 0);
     glVertexAttribBinding(0, 0);
     glBindVertexArray(0);
+
+    sun.direction = SunLightDirFromHDR(HdrPath);
+    BakeCubemap();
+}
+
+void HW3::BakeCubemap()
+{
+    glUseProgramStages(state.renderPipeline, GL_COMPUTE_SHADER_BIT, bakeCompute.shaderId);
+    glActiveShaderProgram(state.renderPipeline, bakeCompute.shaderId);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, hdrEquirect.textureId);
+    glBindImageTexture(0, skyCubemap.textureId, 0, GL_TRUE, 0,
+                       GL_WRITE_ONLY, GL_RGBA32F);
+
+    GLuint groups = GLuint(skyCubemap.faceSize) / 8u;
+    glDispatchCompute(groups, groups, 6);
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+
+    glBindTexture(GL_TEXTURE_CUBE_MAP, skyCubemap.textureId);
+    glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
 }
 
 void HW3::ResetFramebuffer()
