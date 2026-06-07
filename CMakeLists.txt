@@ -87,6 +87,9 @@ set(SRC_ALL
     # HW2 Related
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hw2.h
     ${CMAKE_CURRENT_SOURCE_DIR}/src/hw2.cpp
+    # HW3 Related
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hw3.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/hw3.cpp
     # For example,
     # ${CMAKE_CURRENT_SOURCE_DIR}/src/myNewFile.cpp
     )

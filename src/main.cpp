@@ -19,6 +19,11 @@
 // ============== //
 #include "hw2.h"
 
+// ============== //
+//  HW3-CODE Here //
+// ============== //
+#include "hw3.h"
+
 static constexpr double DefaultSensitivity = 0.0025;
 
 void WindowPositionCallback(GLFWwindow* wnd, int x, int y)
@@ -215,7 +220,8 @@ int main(int argc, const char* argv[])
     bool isFullscreen = state.fullscreen;
 
     //HW1 hw1(threadPool, state);
-    HW2 hw2(threadPool, state);
+    //HW2 hw2(threadPool, state);
+    HW3 hw3(threadPool, state);
 
     // ================ //
     //     GUI Init     //
@@ -243,7 +249,8 @@ int main(int argc, const char* argv[])
         //      HW 1       //
         // =============== //
         //hw1.Work();
-        hw2.Work();
+        //hw2.Work();
+        hw3.Work();
 
 
         // ================ //
