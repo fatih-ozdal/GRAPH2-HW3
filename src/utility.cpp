@@ -211,11 +211,15 @@ ShaderGL::ShaderGL(Type t, const std::string& path)
 
     static const char* const VertexStr = "Vertex";
     static const char* const FragmentStr = "Fragment";
+    static const char* const GeometryStr = "Geometry";
+    static const char* const ComputeStr = "Compute";
     const char* shaderTypeStr = nullptr;
     switch(t)
     {
         case ShaderGL::VERTEX:      shaderTypeStr = VertexStr; break;
         case ShaderGL::FRAGMENT:    shaderTypeStr = FragmentStr; break;
+        case ShaderGL::GEOMETRY:    shaderTypeStr = GeometryStr; break;
+        case ShaderGL::COMPUTE:     shaderTypeStr = ComputeStr; break;
         default:
         {
             std::fprintf(stderr, "Unkown Shader Type while compiling \"%s\"!",
@@ -602,6 +606,26 @@ TextureGL::TextureGL(const std::string& texPath,
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     stbi_image_free(rawPixels);
+}
+
+CubemapGL::CubemapGL(int faceSizeIn)
+    : faceSize(faceSizeIn)
+{
+    // Full mip chain: the IBL shaders approximate roughness/diffuse via textureLod.
+    uint32_t mipCount = uint32_t(faceSize);
+    mipCount = (sizeof(GLsizei) * CHAR_BIT) - uint32_t(std::countl_zero(mipCount));
+
+    glGenTextures(1, &textureId);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, textureId);
+    glTexStorage2D(GL_TEXTURE_CUBE_MAP, GLsizei(mipCount), GL_RGB32F,
+                   faceSize, faceSize);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
 }
 
 GeoDataDTED::GeoDataDTED(const std::string& fName)

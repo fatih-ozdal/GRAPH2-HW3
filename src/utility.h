@@ -104,7 +104,9 @@ struct ShaderGL
     enum Type
     {
         VERTEX = GL_VERTEX_SHADER,
-        FRAGMENT = GL_FRAGMENT_SHADER
+        FRAGMENT = GL_FRAGMENT_SHADER,
+        GEOMETRY = GL_GEOMETRY_SHADER,
+        COMPUTE = GL_COMPUTE_SHADER
     };
 
     GLuint      shaderId = 0;
@@ -177,6 +179,21 @@ struct TextureGL
     TextureGL& operator=(const TextureGL&) = delete;
     TextureGL& operator=(TextureGL&&);
                ~TextureGL();
+};
+
+struct CubemapGL
+{
+    GLuint  textureId = 0;
+    int     faceSize  = 0;  // width == height of each face
+
+    // Allocates an empty RGB32F cubemap with a full mip chain; the bake
+    // compute shader writes the contents later.
+               CubemapGL(int faceSize);
+               CubemapGL(const CubemapGL&) = delete;
+               CubemapGL(CubemapGL&&);
+    CubemapGL& operator=(const CubemapGL&) = delete;
+    CubemapGL& operator=(CubemapGL&&);
+               ~CubemapGL();
 };
 
 struct GeoDataDTED
@@ -274,12 +291,35 @@ inline TextureGL::TextureGL(TextureGL&& other)
 inline TextureGL& TextureGL::operator=(TextureGL&& other)
 {
     assert(this != &other);
+    if(textureId) glDeleteTextures(1, &textureId);
     textureId = other.textureId;
     other.textureId = 0;
     return *this;
 }
 
 inline TextureGL::~TextureGL()
+{
+    if(textureId) glDeleteTextures(1, &textureId);
+}
+
+inline CubemapGL::CubemapGL(CubemapGL&& other)
+    : textureId(other.textureId)
+    , faceSize(other.faceSize)
+{
+    other.textureId = 0;
+}
+
+inline CubemapGL& CubemapGL::operator=(CubemapGL&& other)
+{
+    assert(this != &other);
+    if(textureId) glDeleteTextures(1, &textureId);
+    textureId = other.textureId;
+    faceSize = other.faceSize;
+    other.textureId = 0;
+    return *this;
+}
+
+inline CubemapGL::~CubemapGL()
 {
     if(textureId) glDeleteTextures(1, &textureId);
 }
