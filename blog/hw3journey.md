@@ -66,11 +66,24 @@ vec3 FaceDirection(uint face, vec2 uv)
 
 After the bake, `glGenerateMipmap(GL_TEXTURE_CUBE_MAP)` produces the full mip chain for LOD sampling in the scene shaders. The sky background shader reconstructs the world-space view ray per pixel using the inverse view rotation matrix and samples the cubemap directly with `textureLod(skyCubemap, dir, 0.0)`.
 
+To verify the bake was producing correct results independently of the sampling bug, I dumped all six cubemap faces to PPM files at startup. The face dump confirmed the directions were correct — each face showed the expected portion of the sky.
+
+![Cubemap face dump](assets/faces.png)
+
 ### Mesa / Intel Driver Issues
 
 Getting this to work on Linux with Mesa Intel drivers turned out to be most of the debugging time. Several driver-specific issues appeared that did not occur on Windows:
 
-**Texture unit collision.** The tonemapper bound `frameColorTex` (a `GL_TEXTURE_2D`) to unit 0 at the end of each frame. The next frame, the sky background bound `skyCubemap` (a `GL_TEXTURE_CUBE_MAP`) to the same unit 0. While OpenGL technically allows a unit to host bindings of different targets simultaneously, Mesa's Intel driver failed the texture completeness check and sampled the 2D target instead of the cube target — causing the sky to show the previous frame's rendered scene rather than the HDR sky. Fix: move the tonemapper's framebuffer texture to unit 15.
+The symptom was bizarre: instead of the sky, the background filled with a tiled, mirrored *army of planes*. The sky's `samplerCube` was not sampling the cubemap at all — it was reading the tonemapper's 2D color texture (the previous frame's rendered scene) off the shared texture unit, so every frame fed its own output back into the background and multiplied the plane endlessly across the horizon. The eerie, repeating result reminded me of the upcoming game *Control Resonant*.
+
+<p align="center">
+  <img src="assets/army4.png" width="48%"/>
+  <img src="assets/army5.png" width="48%"/>
+</p>
+
+Tracking it down revealed several distinct Mesa-specific problems stacked on top of each other. Here is each one and the fix that resolved it.
+
+**Texture unit collision.** This was the cause of the army of planes. The tonemapper bound `frameColorTex` (a `GL_TEXTURE_2D`) to unit 0 at the end of each frame. The next frame, the sky background bound `skyCubemap` (a `GL_TEXTURE_CUBE_MAP`) to the same unit 0. While OpenGL technically allows a unit to host bindings of different targets simultaneously, Mesa's Intel driver failed the texture completeness check and sampled the 2D target instead of the cube target — so the `samplerCube` returned the previous frame's rendered scene rather than the HDR sky. Fix: move the tonemapper's framebuffer texture to unit 15, isolating it from the cubemap on unit 0, and unbind textures at the end of each pass so nothing lingers between frames.
 
 **`imageSize()` returning zero on `writeonly` images.** The original shader queried the cubemap face size with `imageSize(uCube).xy`. On Intel Mesa, `writeonly` image descriptors do not bind the read side, so `imageSize()` returns `(0, 0)`. The early-exit guard `if(texel >= size) return;` then fired for every thread, leaving the cubemap entirely black. Fix: pass the face size as a uniform `int uFaceSize` from the CPU instead.
 
@@ -156,23 +169,10 @@ For rendering, an empty VAO is used with no vertex attributes. A draw call launc
 
 HW3 pushed into territory that HW2 only hinted at: using the GPU not just for rendering but for general computation (the cubemap bake, cloud ray marching and rain particles). The Mesa driver debugging was unexpectedly time-consuming but ended up being a good lesson in how much driver behavior varies across platforms, and how to write defensive OpenGL code that works everywhere.
 
-Below is a demo video and screenshots of the final scene.
-
----
-
-**Demo Video** — click to watch
-
-<p align="center">
-  <a href="YOUR_VIDEO_LINK_HERE">
-    <img src="https://img.youtube.com/vi/YOUR_VIDEO_ID/0.jpg" alt="Demo Video"/>
-  </a>
-</p>
-
----
-
-**Volumetric clouds over the terrain**
+Below are some screenshots of the final scene.
 
 ![Clouds and terrain](assets/clouds.png)
+![Volumetric clouds filling the sky](assets/clouds2.png)
 
 ---
 
